@@ -13,8 +13,10 @@
         "lint": "eslint *.js"
     },
     "dependencies": {
+        "concurrently": "^8.2.1",
         "fabric-ca-client": "^2.2.4",
-        "fabric-network": "^2.2.4"
+        "fabric-network": "^2.2.4",
+        "ntp-client": "^0.5.3"
     },
     "devDependencies": {
         "eslint": "^7.32.0"

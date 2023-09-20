@@ -237,13 +237,16 @@ ldap:
 # which are always stored in lower case.
 #############################################################################
 affiliations:
-   org1:
+    org1:
       - department1
+    org2:
       - department2
-   org2:
-      - department1
-   org3:
-      - department1
+    org3:
+      - department3
+    org4:
+      - department4
+   #repeatX# #orgsDep#
+
 
 #############################################################################
 #  Signing section

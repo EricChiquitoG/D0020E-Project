@@ -2,6 +2,8 @@
   $container_name: #VARIABLE#
     container_name: $container_name #VARIABLE#
     image: hyperledger/fabric-peer:latest
+    stdin_open: true
+    tty: true
     labels:
       service: hyperledger-fabric
     environment:

@@ -1,3 +1,4 @@
+ 
    /*
  * Copyright IBM Corp. All Rights Reserved.
  *
@@ -12,7 +13,7 @@
 const { Gateway, Wallets } = require('fabric-network');
 const path = require('path');
 const { buildCCPOrgx, buildWallet, prettyJSONString} = require('../../test-application/javascript/AppUtil.js');
-
+var ntpClient = require('ntp-client');
 const myChannel = 'mychannel';
 const myChaincodeName = 'auction';
 
@@ -34,11 +35,26 @@ async function bid(ccp,wallet,user,orgMSP,auctionID,price) {
 
 		let result1 = await contract.evaluateTransaction('QueryAuction',auctionID);
 
-        //Check if submited
+     //Check if submited
         let valid = true;
-        if (result1.toString().includes(orgMSP)) { valid=false; }
+		const now = new Date();
+		const nowString = now.toISOString();
+		let timestamp = nowString;
+		let end_time = JSON.parse(result1.toString())
+		const end_date = new Date(end_time.timelimit);
+		if (now > end_date){ valid=false; console.log('*** Auction time limit reached, bid not valid')}
+		//if (result1.toString().includes(orgMSP)) { valid=false; }
 
-        let bidData = { objectType: 'bid', price: parseInt(price), org: orgMSP, bidder: bidder.toString(), Valid: valid};
+		ntpClient.getNetworkTime("pool.ntp.org", 123, (err, date) => {
+			if (err) {
+			  console.error(err);
+			} else {
+			  console.log("Current time:", date);
+			  // Use the date object for further processing
+			}
+		  });
+
+        let bidData = { objectType: 'bid', price: parseInt(price), org: orgMSP, bidder: bidder.toString(), Valid: valid, Timestamp: timestamp};
 
 		let statefulTxn = contract.createTransaction('Bid');
 		statefulTxn.setEndorsingOrganizations(orgMSP);

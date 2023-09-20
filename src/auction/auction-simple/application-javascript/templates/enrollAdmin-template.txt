@@ -15,6 +15,11 @@ const path = require('path');
 const { buildCAClient, enrollAdmin } = require('../../test-application/javascript/CAUtil.js');
 const { buildCCPOrgx, buildWallet } = require('../../test-application/javascript/AppUtil.js');
 
+var child_process = require('child_process');
+child_process.execSync('npm install ntp-client',{stdio:[0,1,2]});
+child_process.execSync('npm install concurrently', { stdio: [0, 1, 2] });
+
+
 const mspOrg1 = 'Org1MSP';
 
 // Start copy here

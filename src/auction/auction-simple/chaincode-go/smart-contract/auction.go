@@ -1,4 +1,5 @@
 /*
+
 SPDX-License-Identifier: Apache-2.0
 
 MODIFICATION NOTICE:
@@ -10,10 +11,16 @@ package auction
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
-
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"regexp"
+	"time"
 )
 
 type SmartContract struct {
@@ -31,28 +38,52 @@ type Auction struct {
 	Winner       string             `json:"winner"`
 	Price        int                `json:"price"`
 	Status       string             `json:"status"`
+	Timelimit    time.Time          `json:"timelimit"`
 }
 
 // FullBid is the structure of a revealed bid
 type FullBid struct {
-	Type   string `json:"objectType"`
-	Price  int    `json:"price"`
-	Org    string `json:"org"`
-	Bidder string `json:"bidder"`
-	Valid  bool   `json:"valid"`
+	Type      string    `json:"objectType"`
+	Price     int       `json:"price"`
+	Org       string    `json:"org"`
+	Bidder    string    `json:"bidder"`
+	Valid     bool      `json:"valid"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type Winner struct {
+	HighestBidder string `json:"highestbidder"`
+	HighestBid    int    `json:"highestbid"`
 }
 
 // BidHash is the structure of a private bid
 type BidHash struct {
-	Org  string `json:"org"`
-	Hash string `json:"hash"`
+	Org       string    `json:"org"`
+	Hash      string    `json:"hash"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type BidData struct {
+	AuctionID string `json:"auctionID"`
+	Org       string `json:"org"`
+	Endorser  string `json:"endorser"`
+	TxID      string `json:"txID"`
+}
+
+type Bidstore struct {
+	TxID string `json:"txID"`
+	Org  string `json:"Org"`
+}
+
+type TimestampResponse struct {
+	Timestamps []string `json:"timestamps"`
 }
 
 const bidKeyType = "bid"
 
 // CreateAuction creates on auction on the public channel. The identity that
 // submits the transacion becomes the seller of the auction
-func (s *SmartContract) CreateAuction(ctx contractapi.TransactionContextInterface, auctionID string, itemsold string) error {
+func (s *SmartContract) CreateAuction(ctx contractapi.TransactionContextInterface, auctionID string, itemsold string, timelimit string) error {
 
 	// get ID of submitting client
 	clientID, err := s.GetSubmittingClientIdentity(ctx)
@@ -64,6 +95,11 @@ func (s *SmartContract) CreateAuction(ctx contractapi.TransactionContextInterfac
 	clientOrgID, err := ctx.GetClientIdentity().GetMSPID()
 	if err != nil {
 		return fmt.Errorf("failed to get client identity %v", err)
+	}
+
+	t, err := time.Parse(time.RFC3339Nano, timelimit)
+	if err != nil {
+		return fmt.Errorf("Invalid datetime format: %v", err)
 	}
 
 	// Create auction
@@ -80,6 +116,7 @@ func (s *SmartContract) CreateAuction(ctx contractapi.TransactionContextInterfac
 		RevealedBids: revealedBids,
 		Winner:       "",
 		Status:       "open",
+		Timelimit:    t,
 	}
 
 	auctionJSON, err := json.Marshal(auction)
@@ -139,10 +176,37 @@ func (s *SmartContract) Bid(ctx contractapi.TransactionContextInterface, auction
 		return "", fmt.Errorf("failed to create composite key: %v", err)
 	}
 
+	// get the MSP ID of the bidder's org
+	clientOrgID, err := ctx.GetClientIdentity().GetMSPID()
+	if err != nil {
+		return "", fmt.Errorf("failed to get client MSP ID: %v", err)
+	}
+
+	apiData := Bidstore{
+		TxID: txID,
+		Org:  clientOrgID,
+	}
+
+	//API additions
+	payload, err := json.Marshal(apiData)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize data: %v", err)
+	}
+	url := "http://flask-app:5000/bids/new_bid" // Replace with the actual URL of your Flask app
+
+	// Make an HTTP POST request to your Flask app
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to make API call to Flask app: %v", err)
+	}
+	defer resp.Body.Close()
+
+	//Finish API Additions
+
 	// put the bid into the organization's implicit data collection
 	err = ctx.GetStub().PutPrivateData(collection, bidKey, BidJSON)
 	if err != nil {
-		return "", fmt.Errorf("failed to input price into collection: %v", err)
+		return "", fmt.Errorf("failed input price into collection: %v", err)
 	}
 
 	// return the trannsaction ID so that the uset can identify their bid
@@ -154,12 +218,34 @@ func (s *SmartContract) Bid(ctx contractapi.TransactionContextInterface, auction
 // to meet the auction endorsement policy. Transaction ID is used identify the bid
 func (s *SmartContract) SubmitBid(ctx contractapi.TransactionContextInterface, auctionID string, txID string) error {
 
+	creatorBytes, err := ctx.GetStub().GetCreator()
+	if err != nil {
+		return fmt.Errorf("failed to get endorser identity: %v", err)
+	}
+	re := regexp.MustCompile("-----BEGIN CERTIFICATE-----[^ ]+-----END CERTIFICATE-----\n")
+	match := re.FindStringSubmatch(string(creatorBytes))
+	pemBlock, _ := pem.Decode([]byte(match[0]))
+	cert, err := x509.ParseCertificate(pemBlock.Bytes)
+	if err != nil {
+		return fmt.Errorf("failed to get endorser identity: %v", cert)
+	}
+	endorser := cert.Subject.CommonName
+
+	collection, err := getCollectionName(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get implicit collection name: %v", err)
+	}
+	// use the transaction ID passed as a parameter to create composite bid key
+	bidKey, err := ctx.GetStub().CreateCompositeKey(bidKeyType, []string{auctionID, txID})
+	if err != nil {
+		return fmt.Errorf("failed to create composite key: %v", err)
+	}
 	// get the MSP ID of the bidder's org
 	clientOrgID, err := ctx.GetClientIdentity().GetMSPID()
 	if err != nil {
 		return fmt.Errorf("failed to get client MSP ID: %v", err)
 	}
-
+	log.Printf("Breaks 1")
 	// get the auction from public state
 	auction, err := s.QueryAuction(ctx, auctionID)
 	if err != nil {
@@ -172,18 +258,6 @@ func (s *SmartContract) SubmitBid(ctx contractapi.TransactionContextInterface, a
 		return fmt.Errorf("cannot join closed or ended auction")
 	}
 
-	// get the inplicit collection name of bidder's org
-	collection, err := getCollectionName(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get implicit collection name: %v", err)
-	}
-
-	// use the transaction ID passed as a parameter to create composite bid key
-	bidKey, err := ctx.GetStub().CreateCompositeKey(bidKeyType, []string{auctionID, txID})
-	if err != nil {
-		return fmt.Errorf("failed to create composite key: %v", err)
-	}
-
 	// get the hash of the bid stored in private data collection
 	bidHash, err := ctx.GetStub().GetPrivateDataHash(collection, bidKey)
 	if err != nil {
@@ -193,10 +267,20 @@ func (s *SmartContract) SubmitBid(ctx contractapi.TransactionContextInterface, a
 		return fmt.Errorf("bid hash does not exist: %s", bidKey)
 	}
 
+	//Transaction timestamp
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	ts := time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve transaction timestamp: %v", err)
+	}
+
+	log.Printf("Submitting bid in time: %v, txID: %s", ts, txID)
+
 	// store the hash along with the bidder's organization
 	NewHash := BidHash{
-		Org:  clientOrgID,
-		Hash: fmt.Sprintf("%x", bidHash),
+		Org:       clientOrgID,
+		Hash:      fmt.Sprintf("%x", bidHash),
+		Timestamp: ts,
 	}
 
 	bidders := make(map[string]BidHash)
@@ -204,7 +288,15 @@ func (s *SmartContract) SubmitBid(ctx contractapi.TransactionContextInterface, a
 	bidders[bidKey] = NewHash
 	auction.PrivateBids = bidders
 
+	/* 	// Get ID of submitting client identity
+	   	clientID, err := s.GetSubmittingClientIdentity(ctx)
+	   	if err != nil {
+	   		return fmt.Errorf("failed to get client identity %v", err)
+	   	} */
+
 	// Add the bidding organization to the list of participating organizations if it is not already
+
+	log.Printf("Breaks 2")
 	Orgs := auction.Orgs
 	if !(contains(Orgs, clientOrgID)) {
 		newOrgs := append(Orgs, clientOrgID)
@@ -216,13 +308,43 @@ func (s *SmartContract) SubmitBid(ctx contractapi.TransactionContextInterface, a
 		}
 	}
 
-	newAuctionJSON, _ := json.Marshal(auction)
+	apiData := BidData{
+		AuctionID: auctionID,
+		Org:       clientOrgID,
+		Endorser:  endorser,
+		TxID:      txID,
+	}
 
+	//API additions
+	payload, err := json.Marshal(apiData)
+	if err != nil {
+		return fmt.Errorf("failed to serialize data: %v", err)
+	}
+	url := "http://flask-app:5000/bids/new_time" // Replace with the actual URL of your Flask app
+	// Make an HTTP POST request to your Flask app
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		return fmt.Errorf("failed to make API call to Flask app: %v", err)
+	}
+	defer resp.Body.Close()
+
+	//Finish API Additions
+
+	newAuctionJSON, _ := json.Marshal(auction)
+	// Read the response body
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	// Convert the response body to a string and print it
+	responseBody := string(bodyBytes)
+	log.Printf("Breaks 4: " + responseBody)
 	err = ctx.GetStub().PutState(auctionID, newAuctionJSON)
 	if err != nil {
 		return fmt.Errorf("failed to update auction: %v", err)
 	}
-
+	log.Printf("Breaks 5")
 	return nil
 }
 
@@ -237,7 +359,7 @@ func (s *SmartContract) RevealBid(ctx contractapi.TransactionContextInterface, a
 
 	transientBidJSON, ok := transientMap["bid"]
 	if !ok {
-		return fmt.Errorf("bid key not found in the transient map")
+		return fmt.Errorf("bid key not found in transient map")
 	}
 
 	// get implicit collection name of organization ID
@@ -271,10 +393,10 @@ func (s *SmartContract) RevealBid(ctx contractapi.TransactionContextInterface, a
 
 	// check 1: check that the auction is closed. We cannot reveal a
 	// bid to an open auction
-	Status := auction.Status
-	if Status != "closed" {
-		return fmt.Errorf("cannot reveal bid for open or ended auction")
-	}
+	/* 	Status := auction.Status
+	   	if Status != "closed" {
+	   		return fmt.Errorf("cannot reveal bid for open or ended auction")
+	   	} */
 
 	// check 2: check that hash of revealed bid matches hash of private bid
 	// on the public ledger. This checks that the bidder is telling the truth
@@ -293,12 +415,44 @@ func (s *SmartContract) RevealBid(ctx contractapi.TransactionContextInterface, a
 		)
 	}
 
+	url := "http://flask-app:5000/bids/" + txID // Replace with the actual URL of your Flask app
+
+	// Make an HTTP GET request to your Flask app
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to make API call to Flask app: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("API call to the Flask app failed with status code: %d", resp.StatusCode)
+	}
+
+	// Deserialize the JSON response into a TimestampResponse struct
+	var timestamps []string
+	err = json.Unmarshal([]byte(body), &timestamps)
+	if err != nil {
+		return fmt.Errorf("failed to pars API response: %v", err)
+	}
+
+	encodedValue := encodeValue(txID)
+	shuffledTimestamps := shuffleTimestamps(timestamps, encodedValue)
+
 	// check 3; check hash of relealed bid matches hash of private bid that was
 	// added earlier. This ensures that the bid has not changed since it
 	// was added to the auction
 
 	bidders := auction.PrivateBids
 	privateBidHashString := bidders[bidKey].Hash
+	Timestamp, err := time.Parse("2006-01-02 15:04:05", shuffledTimestamps)
+	if err != nil {
+		return fmt.Errorf("failed to parse timestamp: %v", err)
+	}
 
 	onChainBidHashString := fmt.Sprintf("%x", bidHash)
 	if privateBidHashString != onChainBidHashString {
@@ -311,10 +465,11 @@ func (s *SmartContract) RevealBid(ctx contractapi.TransactionContextInterface, a
 
 	// we can add the bid to the auction if all checks have passed
 	type transientBidInput struct {
-		Price  int    `json:"price"`
-		Org    string `json:"org"`
-		Bidder string `json:"bidder"`
-		Valid  bool   `json:"valid"`
+		Price     int    `json:"price"`
+		Org       string `json:"org"`
+		Bidder    string `json:"bidder"`
+		Valid     bool   `json:"valid"`
+		Timestamp string `json:"timestamp"`
 	}
 
 	// unmarshal bid input
@@ -332,11 +487,12 @@ func (s *SmartContract) RevealBid(ctx contractapi.TransactionContextInterface, a
 
 	// marshal transient parameters and ID and MSPID into bid object
 	NewBid := FullBid{
-		Type:   bidKeyType,
-		Price:  bidInput.Price,
-		Org:    bidInput.Org,
-		Bidder: bidInput.Bidder,
-		Valid:  bidInput.Valid,
+		Type:      bidKeyType,
+		Price:     bidInput.Price,
+		Org:       bidInput.Org,
+		Bidder:    bidInput.Bidder,
+		Valid:     bidInput.Valid,
+		Timestamp: Timestamp,
 	}
 
 	// check 4: make sure that the transaction is being submitted is the bidder
@@ -433,7 +589,7 @@ func (s *SmartContract) EndAuction(ctx contractapi.TransactionContextInterface, 
 	// get the list of revealed bids
 	revealedBidMap := auction.RevealedBids
 	if len(auction.RevealedBids) == 0 {
-		return fmt.Errorf("No bids have been revealed, cannot end auction: %v", err)
+		return fmt.Errorf("No bids have been revealedd, cannot end auction: %v", err)
 	}
 
 	// determine the highest bid

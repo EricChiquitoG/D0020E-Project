@@ -5,12 +5,13 @@ SPDX-License-Identifier: Apache-2.0
 package auction
 
 import (
-	"fmt"
 	"encoding/base64"
-
+	"fmt"
 	"github.com/hyperledger/fabric-chaincode-go/pkg/statebased"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
+	"hash/crc32"
+	"math/rand"
 )
 
 func (s *SmartContract) GetSubmittingClientIdentity(ctx contractapi.TransactionContextInterface) (string, error) {
@@ -118,4 +119,27 @@ func contains(sli []string, str string) bool {
 		}
 	}
 	return false
+}
+
+// Takes the txID and hash it to a value between 1 and 10
+func encodeValue(value string) int {
+	hash := crc32.ChecksumIEEE([]byte(value))
+	encoded := int(hash%10 + 1)
+	return encoded
+}
+
+// Receives the timestamps from all endorsing peers and the encoded txID and shuffles them
+func shuffleTimestamps(timestamps []string, encodedValue int) string {
+	rand.Seed(int64(encodedValue)) // Use a fixed seed value for deterministic shuffling
+
+	// Create a copy of the timestamps slice to avoid modifying the original slice
+	shuffledTimestamps := make([]string, len(timestamps))
+	copy(shuffledTimestamps, timestamps)
+
+	// Shuffle the copied slice based on the encoded values
+	rand.Shuffle(len(shuffledTimestamps), func(i, j int) {
+		shuffledTimestamps[i], shuffledTimestamps[j] = shuffledTimestamps[j], shuffledTimestamps[i]
+	})
+
+	return shuffledTimestamps[0]
 }

@@ -134,3 +134,34 @@ func checkForHigherBid(ctx contractapi.TransactionContextInterface, auctionPrice
 
 	return error
 }
+
+// function used to get highest bid and bidder
+func (s *SmartContract) GetHb(ctx contractapi.TransactionContextInterface, auctionID string) (*Winner, error) {
+
+	// get auction from public state
+	auction, err := s.QueryAuction(ctx, auctionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auction from public state %v", err)
+	}
+
+	// Check that the auction is being ended by the seller
+
+	// get the list of revealed bids
+	revealedBidMap := auction.RevealedBids
+	if len(auction.RevealedBids) == 0 {
+		return &Winner{HighestBidder: "None", HighestBid: 0}, nil
+	}
+
+	highest := &Winner{}
+
+	// determine the highest bid
+	for _, bid := range revealedBidMap {
+		if bid.Price > highest.HighestBid {
+			highest.HighestBidder = bid.Org
+			highest.HighestBid = bid.Price
+		}
+	}
+	//bids := fmt.Sprintf("%v", h_bid)
+
+	return highest, nil
+}

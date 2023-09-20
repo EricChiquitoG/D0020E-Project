@@ -15,6 +15,7 @@ const path = require('path');
 const { buildCAClient, registerAndEnrollUser } = require('../../test-application/javascript/CAUtil.js');
 const { buildCCPOrgx, buildWallet } = require('../../test-application/javascript/AppUtil.js');
 
+
 const mspOrg1 = 'Org1MSP';
 
 // Start copy here

@@ -1,4 +1,4 @@
-/*
+   /*
  * Copyright IBM Corp. All Rights Reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -35,7 +35,7 @@ async function addBid(ccp,wallet,user,auctionID,bidID) {
 		// console.log('*** Result:  Bid: ' + prettyJSONString(auctionString.toString()));
 		let auctionJSON = JSON.parse(auctionString);
 
-		let bidData = { objectType: 'bid', price: parseInt(bidJSON.price), org: bidJSON.org, bidder: bidJSON.bidder, Valid: bidJSON.valid};
+		let bidData = { objectType: 'bid', price: parseInt(bidJSON.price), org: bidJSON.org, bidder: bidJSON.bidder, Valid: bidJSON.valid, Timestamp: bidJSON.timestamp};
 		console.log('*** Result:  Bid: ' + JSON.stringify(bidData,null,2));
 
 		let statefulTxn = contract.createTransaction('RevealBid');

@@ -1,4 +1,4 @@
-/*
+      /*
  * Copyright IBM Corp. All Rights Reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -6,6 +6,7 @@
  * MODIFICATION NOTICE: 
  * files been generlized from original and generated during setup
  */
+
 
 'use strict';
 
@@ -46,25 +47,65 @@ async function submitBid(ccp,wallet,user,orgMSP,auctionID,bidID,orgMSPs) {
 		let qb = await contract.evaluateTransaction('QueryBid',auctionID,bidID);
 		let qa = await contract.evaluateTransaction('QueryAuction',auctionID);
 
-		let statefulTxn = contract.createTransaction('SubmitBid');
-		
-		statefulTxn.setEndorsingOrganizations(...auctionJSON.organizations);
+		console.log("---bid: "+qb);
+		console.log("---auction: "+qa);
+
+		let h_bidder1, h_bid1 = await contract.evaluateTransaction('GetHb',auctionID);
+		let current_w=h_bid1.highestbidder;
+
+
+		let statefulTxn1 = contract.createTransaction('SubmitBid');
+
+
+		statefulTxn1.setEndorsingOrganizations(...auctionJSON.organizations);
 
 		console.log('\n--> Submit Transaction: add bid to the auction');
 
 		let valid=true;
 
-		if (qb.toString().includes("false") || (qb.toString().includes("true") && qa.toString().includes(orgMSP))) {
+		if (qb.toString().includes("false") ||orgMSP === current_w) {
 			valid=false;
 		}
 
-		await statefulTxn.submit(auctionID,bidID,valid);
+		await statefulTxn1.submit(auctionID,bidID,valid);
+		
+		//Added
+		let auctionString2 = await contract.evaluateTransaction('QueryAuction',auctionID);
+		let auctionJSON2 = JSON.parse(auctionString2);
+
+		let statefulTxn2 = contract.createTransaction('RevealBid');
+		let qb2 = await contract.evaluateTransaction('QueryBid',auctionID,bidID);
+
+		console.log("---bid 2: "+qb)
+
+		let bidJSON = JSON.parse(qb2);
+		let bidData = { objectType: 'bid', price: parseInt(bidJSON.price), org: bidJSON.org, bidder: bidJSON.bidder, Valid: bidJSON.valid, Timestamp: bidJSON.timestamp};
+		let tmapData = Buffer.from(JSON.stringify(bidData));
+		
+		statefulTxn2.setTransient({
+			bid: tmapData
+		});
+			
 
 		console.log('\n--> Evaluate Transaction: query the auction to see that our bid was added');
 		let result = await contract.evaluateTransaction('QueryAuction',auctionID);
 		console.log('*** Result: Auction: ' + prettyJSONString(result.toString()));
 
+		
+		//added
+		
+		statefulTxn2.setEndorsingOrganizations(...auctionJSON2.organizations);
+		await statefulTxn2.submit(auctionID,bidID,bidJSON.valid);
+		console.log('\n--> Evaluate Transaction: query the auction to see that our bid was added');
+		let result2 = await contract.evaluateTransaction('QueryAuction',auctionID);
+		console.log('*** Result: Auction: ' + prettyJSONString(result2.toString()));
+
+
+		let h_bidder, h_bid = await contract.evaluateTransaction('GetHb',auctionID);
+		console.log('**** Highest bidder:' +  h_bid);
+
 		gateway.disconnect();
+		/*
 		orgMSPs.forEach(element => {if (!result.toString().includes(element)) { process.exit(0); }});
 		
 		let seller = "";
@@ -75,7 +116,7 @@ async function submitBid(ccp,wallet,user,orgMSP,auctionID,bidID,orgMSPs) {
 		const walletPath = path.join(__dirname, 'wallet/' + seller);
 		const wallet2 = await buildWallet(Wallets, walletPath);
 
-		closeAuction.closeAuction(eval("buildCCPOrg" + seller.slice(-1)+"()"), wallet2, "seller", auctionID);
+		closeAuction.closeAuction(eval("buildCCPOrg" + seller.slice(-1)+"()"), wallet2, "seller", auctionID);*/
 	} catch (error) {
 		console.error(`******** FAILED to submit bid: ${error}`);
 		process.exit(1);
@@ -117,6 +158,5 @@ async function main() {
 		process.exit(1);
 	}
 }
-
 
 main();

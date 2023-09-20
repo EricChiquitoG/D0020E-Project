@@ -1,4 +1,7 @@
 #!/bin/bash
+# MODIFICATION NOTICE: 
+# files been generlized from original and generated during setup
+#
 
 # imports  
 . scripts/envVar.sh
@@ -41,7 +44,7 @@ createChannel() {
 	while [ $rc -ne 0 -a $COUNTER -lt $MAX_RETRY ] ; do
 		sleep $DELAY
 		set -x
-		osnadmin channel join --channelID $CHANNEL_NAME --config-block ./channel-artifacts/${CHANNEL_NAME}.block -o localhost: --ca-file "$ORDERER_CA" --client-cert "$ORDERER_ADMIN_TLS_SIGN_CERT" --client-key "$ORDERER_ADMIN_TLS_PRIVATE_KEY" >&log.txt
+		osnadmin channel join --channelID $CHANNEL_NAME --config-block ./channel-artifacts/${CHANNEL_NAME}.block -o localhost:7053 --ca-file "$ORDERER_CA" --client-cert "$ORDERER_ADMIN_TLS_SIGN_CERT" --client-key "$ORDERER_ADMIN_TLS_PRIVATE_KEY" >&log.txt
 		res=$?
 		{ set +x; } 2>/dev/null
 		let rc=$res
@@ -69,7 +72,7 @@ joinChannel() {
 		COUNTER=$(expr $COUNTER + 1)
 	done
 	cat log.txt
-	verifyResult $res "After $MAX_RETRY attempts, peer0.org${ORG} has failed to join channel '$CHANNEL_NAME' "
+	verifyResult $res "After $MAX_RETRY attempts, peer0.org${ORG} has failed to join channel $CHANNEL_NAME "
 }
 
 setAnchorPeer() {
@@ -96,11 +99,21 @@ infoln "Joining org1 peer to the channel..."
 joinChannel 1
 infoln "Joining org2 peer to the channel..."
 joinChannel 2
+infoln "Joining org3 peer to the channel..."
+joinChannel 3
+infoln "Joining org4 peer to the channel..."
+joinChannel 4
+#repeatX##JoinPeer#
 
 ## Set the anchor peers for each org in the channel
-infoln "Setting anchor peer for org1..."
+infoln "Setting anchor peer for org..."
 setAnchorPeer 1
-infoln "Setting anchor peer for org2..."
+infoln "Setting anchor peer for org..."
 setAnchorPeer 2
+infoln "Setting anchor peer for org..."
+setAnchorPeer 3
+infoln "Setting anchor peer for org..."
+setAnchorPeer 4
+#repeatX##SetAnchorPeer#
 
 successln "Channel '$CHANNEL_NAME' joined"
